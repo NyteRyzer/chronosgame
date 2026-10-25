@@ -13,6 +13,10 @@ var speed := 12.0
 var dir := 1.0
 var label := ""
 var frozen := 0.0
+var stall := 0.0       # hacked engine
+var driven := false    # the player is driving it
+var parked := false    # abandoned by the player
+var top_speed := 40.0
 var _ice: MeshInstance3D
 var _rotors: Array = []
 
@@ -21,6 +25,7 @@ func setup(new_era: int, x: float, z: float, direction: float, speed_scale: floa
 	era = new_era
 	var info := EraData.era_info(era)
 	speed = info.vehicle_speed * speed_scale
+	top_speed = info.vehicle_top_speed
 	label = info.vehicle
 	dir = direction
 	position = Vector3(x, 0, z)
@@ -120,8 +125,15 @@ func _part(mesh: PrimitiveMesh, size: Vector3, pos: Vector3, mat: Material) -> M
 
 func step(delta: float) -> void:
 	_ice.visible = frozen > 0.0
+	if driven:
+		return
 	if frozen > 0.0:
 		frozen = maxf(frozen - delta, 0.0)
+		return
+	if stall > 0.0:
+		stall = maxf(stall - delta, 0.0)
+		return
+	if parked:
 		return
 	for r in _rotors:
 		r.rotate_y(delta * 20.0)

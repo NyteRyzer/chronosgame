@@ -4,6 +4,9 @@ extends CharacterBody3D
 ## stunned by thrown objects, outrun, or shaken off with an era jump while it
 ## can't track you.
 
+const EraData = preload("res://scripts/era_data.gd")
+const Humanoid = preload("res://scripts/humanoid.gd")
+
 const SPEED := 7.6
 const CATCH_RADIUS := 1.5
 const GRAVITY := 20.0
@@ -15,14 +18,20 @@ var portal_total := 2.5
 var frozen := 0.0
 var stunned := 0.0
 var hp := 100.0
+var hunter := false    # Terminator-style HK unit: cannot be destroyed
+var jammed := 0.0      # hacked: tracking offline
 var path := PackedVector3Array()
 var path_provider: Callable  # func(from: Vector3, to: Vector3) -> PackedVector3Array
 var _repath := 0.0
-var _model: Node3D
+var _model: Humanoid
 var _portal: MeshInstance3D
 var _ice: MeshInstance3D
 var _label: Label3D
 var _t := 0.0
+
+
+func speed() -> float:
+	return 6.7 if hunter else SPEED
 
 
 func _ready() -> void:
@@ -35,19 +44,13 @@ func _ready() -> void:
 	shape.shape = cap
 	shape.position.y = 0.95
 	add_child(shape)
-	_model = Node3D.new()
+	_model = Humanoid.new()
 	add_child(_model)
-	var body := CapsuleMesh.new()
-	body.radius = 0.42
-	body.height = 1.9
-	_mesh(_model, body, Vector3(0, 0.95, 0), _mat(Color("1d2b5c")))
-	var visor := BoxMesh.new()
-	visor.size = Vector3(0.55, 0.14, 0.2)
-	_mesh(_model, visor, Vector3(0, 1.55, 0.32), _mat(Color("ff3b3b"), true))
-	var badge := SphereMesh.new()
-	badge.radius = 0.09
-	badge.height = 0.18
-	_mesh(_model, badge, Vector3(0.15, 1.2, 0.4), _mat(Color("ffd34d"), true))
+	_model.build(EraData.HUNTER_OUTFIT if hunter else EraData.COP_OUTFIT)
+	var baton := BoxMesh.new()
+	baton.size = Vector3(0.05, 0.05, 0.6)
+	var b := _mesh(_model.right_hand, baton, Vector3(0, -0.25, 0.05), _mat(Color("ff5a3a"), true))
+	b.rotation_degrees.x = 80
 	var ring := TorusMesh.new()
 	ring.inner_radius = 1.6
 	ring.outer_radius = 2.0
@@ -96,7 +99,7 @@ func open_portal(seconds: float) -> void:
 
 
 func can_track() -> bool:
-	return state == "chase" and frozen <= 0.0 and stunned <= 0.0
+	return state == "chase" and frozen <= 0.0 and stunned <= 0.0 and jammed <= 0.0
 
 
 ## Returns true when the agent catches the player this frame.
@@ -116,6 +119,10 @@ func step(delta: float, target: Vector3) -> bool:
 		stunned = maxf(stunned - delta, 0.0)
 		velocity = Vector3.ZERO
 		return false
+	if jammed > 0.0:
+		jammed = maxf(jammed - delta, 0.0)
+		_model.animate(delta, 0.0)
+		return false
 	_repath -= delta
 	if _repath <= 0.0 and path_provider.is_valid():
 		path = path_provider.call(global_position, target)
@@ -127,8 +134,8 @@ func step(delta: float, target: Vector3) -> bool:
 		goal = path[0]
 	var to := Vector3(goal.x - global_position.x, 0, goal.z - global_position.z)
 	var dir := to.normalized() if to.length() > 0.01 else Vector3.ZERO
-	velocity.x = dir.x * SPEED
-	velocity.z = dir.z * SPEED
+	velocity.x = dir.x * speed()
+	velocity.z = dir.z * speed()
 	if is_on_floor():
 		velocity.y = 0.0
 	else:
@@ -136,6 +143,7 @@ func step(delta: float, target: Vector3) -> bool:
 	move_and_slide()
 	if dir.length() > 0.1:
 		_model.rotation.y = atan2(dir.x, dir.z)
+	_model.animate(delta, Vector2(velocity.x, velocity.z).length())
 	return global_position.distance_to(target) < CATCH_RADIUS
 
 
@@ -147,9 +155,13 @@ func _update_visuals() -> void:
 		var k := 1.0 - portal_time / portal_total
 		_portal.scale = Vector3.ONE * (0.3 + 0.9 * k)
 		_label.text = "BUREAU PORTAL %.1fs" % maxf(portal_time, 0.0)
-	elif frozen > 0.0:
-		_label.text = "TIME COP %d%% - FROZEN %.1fs" % [int(hp), frozen]
-	elif stunned > 0.0:
-		_label.text = "TIME COP %d%% - STUNNED" % int(hp)
 	else:
-		_label.text = "TIME COP %d%%" % int(hp)
+		var who := "HK-800 HUNTER-KILLER" if hunter else "TIME COP %d%%" % int(hp)
+		if frozen > 0.0:
+			_label.text = "%s - FROZEN %.1fs" % [who, frozen]
+		elif jammed > 0.0:
+			_label.text = "%s - SIGNAL JAMMED" % who
+		elif stunned > 0.0:
+			_label.text = "%s - STAGGERED" % who
+		else:
+			_label.text = who

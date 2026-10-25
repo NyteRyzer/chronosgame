@@ -9,6 +9,9 @@ const JUMP := 6.5
 const GRAVITY := 20.0
 const MOUSE_SENS := 0.0025
 
+const EraData = preload("res://scripts/era_data.gd")
+const Humanoid = preload("res://scripts/humanoid.gd")
+
 var stun := 0.0
 var knock := Vector3.ZERO
 var held = null  # the prop being carried (prop.gd)
@@ -17,11 +20,24 @@ var pitch := -0.25
 var rig: Node3D
 var spring: SpringArm3D
 var camera: Camera3D
-var _model: Node3D
+var _model: Humanoid
 var _core: MeshInstance3D
 var _weapon_pivot: Node3D
 var _weapons: Array = []
-var _swing := 0.0
+var weapon_index := 0
+# driving (GTA-style hijacking)
+var driving := false
+var vehicle: Node3D = null
+var vehicle_label := ""
+var car_speed := 0.0
+var car_yaw := 0.0
+var car_top_speed := 40.0
+var crashed := 0.0
+# Time Dodge (Quantum Break-style dash)
+var dash_t := 0.0
+var dash_dir := Vector3.ZERO
+var _cap_shape: CollisionShape3D
+var _car_shape: CollisionShape3D
 var _t := 0.0
 
 
@@ -36,46 +52,35 @@ func _ready() -> void:
 	shape.shape = cap
 	shape.position.y = 0.9
 	add_child(shape)
+	_cap_shape = shape
+	_car_shape = CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(2.3, 1.4, 4.8)
+	_car_shape.shape = box
+	_car_shape.position.y = 0.9
+	_car_shape.disabled = true
+	add_child(_car_shape)
 
-	_model = Node3D.new()
+	_model = Humanoid.new()
 	add_child(_model)
-	var body := CapsuleMesh.new()
-	body.radius = 0.38
-	body.height = 1.75
-	var coat := StandardMaterial3D.new()
-	coat.albedo_color = Color("e8e8ee")
-	_add_mesh(_model, body, Vector3(0, 0.88, 0), coat)
-	var visor := BoxMesh.new()
-	visor.size = Vector3(0.5, 0.12, 0.2)
-	var vm := StandardMaterial3D.new()
-	vm.albedo_color = Color("5fd4ff")
-	vm.emission_enabled = true
-	vm.emission = Color("5fd4ff")
-	_add_mesh(_model, visor, Vector3(0, 1.45, 0.3), vm)
-	# arms
-	var arm := CapsuleMesh.new()
-	arm.radius = 0.11
-	arm.height = 0.75
-	var sleeve := StandardMaterial3D.new()
-	sleeve.albedo_color = Color("c8c8d2")
-	for side in [-1.0, 1.0]:
-		var a := _add_mesh(_model, arm, Vector3(side * 0.5, 1.1, 0.12), sleeve)
-		a.rotation_degrees.x = 60
+	_model.build(EraData.PLAYER_OUTFIT)
 	# Time Pad bracer on the left forearm: housing + glowing screen
 	var housing := BoxMesh.new()
-	housing.size = Vector3(0.24, 0.16, 0.38)
+	housing.size = Vector3(0.13, 0.11, 0.24)
 	var hm := StandardMaterial3D.new()
 	hm.albedo_color = Color("2a2f3a")
 	hm.metallic = 0.8
 	hm.roughness = 0.3
-	_add_mesh(_model, housing, Vector3(0.52, 0.98, 0.32), hm)
+	var bracer := _add_mesh(_model.left_forearm, housing, Vector3(0, -0.16, 0), hm)
+	bracer.rotation_degrees.x = 90
 	var screen := BoxMesh.new()
-	screen.size = Vector3(0.18, 0.04, 0.28)
-	_core = _add_mesh(_model, screen, Vector3(0.52, 1.07, 0.32), vm)
+	screen.size = Vector3(0.09, 0.02, 0.18)
+	_core = _add_mesh(_model.left_forearm, screen, Vector3(0, -0.16, 0.06), _glow(Color("5fd4ff")))
+	_core.rotation_degrees.x = 90
 	# weapons in the right hand
 	_weapon_pivot = Node3D.new()
-	_weapon_pivot.position = Vector3(-0.52, 0.95, 0.4)
-	_model.add_child(_weapon_pivot)
+	_weapon_pivot.rotation_degrees.x = 90  # point the weapon along the forearm
+	_model.right_hand.add_child(_weapon_pivot)
 	_weapons = [_make_blade(), _make_pistol(), _make_orb(Color("6fd8ff")), _make_orb(Color("c070ff"))]
 	set_weapon(0)
 
@@ -146,12 +151,13 @@ func _make_orb(c: Color) -> Node3D:
 
 
 func set_weapon(i: int) -> void:
+	weapon_index = i
 	for k in range(_weapons.size()):
 		_weapons[k].visible = k == i
 
 
 func swing() -> void:
-	_swing = 0.25
+	_model.swing()
 
 
 ## Turn the body to face where the camera aims (used when attacking).
@@ -161,7 +167,7 @@ func face_aim() -> void:
 
 
 func muzzle() -> Vector3:
-	return _weapon_pivot.global_position + _model.global_basis.z * 0.4
+	return _weapon_pivot.global_position
 
 
 func _add_mesh(parent: Node3D, mesh: Mesh, pos: Vector3, mat: Material) -> MeshInstance3D:
@@ -178,13 +184,97 @@ func look(relative: Vector2) -> void:
 	pitch = clampf(pitch - relative.y * MOUSE_SENS, -1.2, 0.6)
 
 
+func dashing() -> bool:
+	return dash_t > 0.0
+
+
+func dash(dir: Vector3) -> void:
+	dash_dir = Vector3(dir.x, 0, dir.z).normalized()
+	dash_t = 0.2
+
+
+func enter_vehicle(v: Node3D, top_speed: float) -> void:
+	driving = true
+	vehicle = v
+	vehicle_label = v.label
+	car_top_speed = top_speed
+	car_yaw = v.global_rotation.y
+	car_speed = 0.0
+	global_position = Vector3(v.global_position.x, global_position.y, v.global_position.z)
+	v.get_parent().remove_child(v)
+	add_child(v)
+	v.position = Vector3.ZERO
+	v.rotation = Vector3(0, car_yaw, 0)
+	_model.visible = false
+	_cap_shape.disabled = true
+	_car_shape.disabled = false
+	_car_shape.rotation.y = car_yaw
+	spring.spring_length = 9.0
+
+
+## Leaves the vehicle; returns it so the caller can park it in the world.
+func exit_vehicle() -> Node3D:
+	var v := vehicle
+	var xf := v.global_transform
+	remove_child(v)
+	v.transform = xf
+	driving = false
+	vehicle = null
+	car_speed = 0.0
+	_model.visible = true
+	_cap_shape.disabled = false
+	_car_shape.disabled = true
+	spring.spring_length = 5.5
+	global_position += Basis(Vector3.UP, car_yaw) * Vector3(-2.8, 0, 0)
+	return v
+
+
+func _drive(delta: float) -> void:
+	var throttle := Input.get_axis("move_down", "move_up")
+	var steer := Input.get_axis("move_right", "move_left")
+	if Input.is_action_pressed("jump"):
+		car_speed = move_toward(car_speed, 0.0, 30.0 * delta)
+	elif throttle != 0.0:
+		car_speed = clampf(car_speed + throttle * 14.0 * delta, -10.0, car_top_speed)
+	else:
+		car_speed = move_toward(car_speed, 0.0, 4.0 * delta)
+	var grip := clampf(absf(car_speed) / 8.0, 0.0, 1.0)
+	car_yaw += steer * 1.7 * delta * grip * signf(car_speed)
+	var fwd := Vector3(sin(car_yaw), 0, cos(car_yaw))
+	velocity.x = fwd.x * car_speed
+	velocity.z = fwd.z * car_speed
+	if not is_on_floor():
+		velocity.y -= GRAVITY * delta
+	move_and_slide()
+	# hitting a wall at speed bleeds most of it off
+	if get_slide_collision_count() > 0 and absf(car_speed) > 12.0:
+		var n := get_slide_collision(0).get_normal()
+		if absf(n.y) < 0.5 and fwd.dot(-n) > 0.5:
+			car_speed *= 0.35
+			crashed = 0.5
+	crashed = maxf(crashed - delta, 0.0)
+	vehicle.rotation.y = car_yaw
+	_car_shape.rotation.y = car_yaw
+	if absf(car_speed) > 2.0:
+		yaw = lerp_angle(yaw, car_yaw + PI, 3.0 * delta)
+		pitch = lerpf(pitch, -0.22, 2.0 * delta)
+	update_camera()
+
+
 func step(delta: float) -> void:
 	_t += delta
+	if driving:
+		_drive(delta)
+		return
 	var input := Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	var basis_yaw := Basis(Vector3.UP, yaw)
 	var wish := basis_yaw * Vector3(input.x, 0, input.y)
 	var speed := SPRINT if Input.is_action_pressed("sprint") else WALK
-	if stun > 0.0:
+	if dash_t > 0.0:
+		dash_t -= delta
+		velocity.x = dash_dir.x * 45.0
+		velocity.z = dash_dir.z * 45.0
+	elif stun > 0.0:
 		stun -= delta
 		velocity.x = knock.x
 		velocity.z = knock.z
@@ -202,11 +292,12 @@ func step(delta: float) -> void:
 	move_and_slide()
 	update_camera()
 	_core.scale = Vector3.ONE * (1.0 + 0.15 * sin(_t * 5.0))
-	if _swing > 0.0:
-		_swing = maxf(_swing - delta, 0.0)
-		_weapon_pivot.rotation = Vector3(0, lerpf(-1.4, 1.2, 1.0 - _swing / 0.25), 0)
-	else:
-		_weapon_pivot.rotation = Vector3.ZERO
+	# ranged weapons/gadgets are held up and the body turns to the aim
+	_model.aim = weapon_index != 0 and held == null
+	if _model.aim and stun <= 0.0:
+		var d := aim_dir()
+		_model.rotation.y = lerp_angle(_model.rotation.y, atan2(d.x, d.z), 14.0 * delta)
+	_model.animate(delta, Vector2(velocity.x, velocity.z).length())
 
 
 func update_camera() -> void:

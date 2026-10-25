@@ -36,6 +36,7 @@ func _run() -> void:
 	root.add_child(main)
 	await frames(2)
 	main.show_help = false
+	main.stutter_timer = 99999.0  # stutters are tested explicitly below
 	await frames(30)
 
 	print("Phase 0: city")
@@ -236,6 +237,100 @@ func _run() -> void:
 	main.attack_cooldown = 0.0
 	main.use_weapon(main.player.aim_origin(), main.player.aim_dir())
 	check(main.hdist(before, main.player.global_position) > 5.0, "Phase Blink teleports (%.1fm)" % main.hdist(before, main.player.global_position))
+
+	print("Phase 10: hijack + 88 mph time jump")
+	main.threat = 0.0
+	main._remove_cop()
+	main.energy = 100.0
+	main.jump_to(EraData.PRESENT)
+	await frames(2)
+	var cab = main.vehicles_root.get_child(0)
+	place(cab.global_position + Vector3(3.0, 0.1, 0))
+	await frames(1)
+	check(main.prompt_text().begins_with("[F] Hijack"), "hijack prompt next to a cab")
+	main.toggle_vehicle()
+	check(main.player.driving and main.player.vehicle == cab, "player drives the cab")
+	main.set_pad_open(true)
+	main.pad_index = EraData.PAST
+	main.pad_confirm()
+	check(main.dialed_era == EraData.PAST and main.era == EraData.PRESENT, "Time Pad sets a destination instead of jumping")
+	main.energy = 100.0
+	main.player.car_speed = 40.0  # 89.5 mph
+	await frames(2)
+	check(main.era == EraData.PAST, "hitting 88 mph jumps to 1890")
+	check(main.player.driving and main.player.vehicle == cab, "the cab came through time with you")
+	check(main.tier() >= 1, "anachronistic cab raises threat (%.0f)" % main.threat)
+	main.toggle_vehicle()
+	check(not main.player.driving and cab.parked, "exit and park the vehicle")
+
+	print("Phase 11: hacking, profiler, time dodge, stutter")
+	main.energy = 100.0
+	main.jump_to(EraData.PRESENT)
+	await frames(2)
+	var w = main.city.walkers[0]
+	var eye2: Vector3 = w.node.global_position + Vector3(6, 1.6, 0)
+	var bio := EraData.citizen_bio(main.era, w.idx)
+	check(bio.name != "" and bio.line != "", "Profiler bio: %s - %s" % [bio.name, bio.line])
+	main.energy = 100.0
+	var car = main.vehicles_root.get_child(1)
+	car.stall = 0.0
+	var eye3: Vector3 = car.global_position + Vector3(12, 1.6, 0)
+	main.hack_aim(eye3, (car.global_position + Vector3(0, 1, 0)) - eye3)
+	check(car.stall > 0.0 and main.energy < 100.0, "hack stalls a car")
+	place(Vector3(220, 0.1, 252))
+	main.player.yaw = PI / 2.0
+	await frames(1)
+	var p0: Vector3 = main.player.global_position
+	main.time_dodge()
+	await frames(15)
+	check(main.hdist(p0, main.player.global_position) > 5.0 and main.dodge_cooldown > 0.0, "Time Dodge dashes (%.1fm)" % main.hdist(p0, main.player.global_position))
+	main.stutter_timer = 0.0
+	await frames(2)
+	var vz2: float = main.vehicles_root.get_child(2).global_position.z
+	await frames(30)
+	check(main.stutter > 0.0 and is_equal_approx(main.vehicles_root.get_child(2).global_position.z, vz2), "time stutter freezes the city")
+	main.stutter_timer = 99999.0
+	await frames(150)
+	check(main.stutter <= 0.0 and not main.city.time_frozen, "stutter ends")
+
+	print("Phase 12: Hunter-Killer + jamming")
+	main.threat = 75.0
+	main.cop_cooldown = 0.0
+	for i in range(400):
+		if main.cop and main.cop.state == "chase":
+			break
+		await frames(1)
+	check(main.cop != null and main.cop.hunter, "threat 3 sends the HK hunter-killer")
+	var hk = main.cop
+	main.damage_cop(500.0, 1.0, "test")
+	check(main.cop == hk and hk.stunned > 0.0, "HK unit only staggers - cannot be destroyed")
+	hk.stunned = 0.0
+	hk.global_position = main.player.global_position + Vector3(0, 0, 6)
+	main.energy = 100.0
+	var eye4: Vector3 = main.player.global_position + Vector3(0, 1.6, 0)
+	main.hack_aim(eye4, (hk.global_position + Vector3(0, 1, 0)) - eye4)
+	check(hk.jammed > 0.0 and not hk.can_track(), "hack jams the hunter's tracking")
+	main.energy = 100.0
+	main.jump_to(EraData.FUTURE)
+	check(main.cop == null and main.follow_timer < 0.0, "jumping while it's jammed escapes it")
+
+	print("Phase 13: aberrations")
+	var egg = null
+	for p in main.props_root.get_children():
+		if p.kind == "egg":
+			egg = p
+	check(egg != null, "dinosaur egg aberration found in 2150")
+	place(egg.global_position + Vector3(1, 0, 0))
+	await frames(1)
+	main.interact()
+	check(main.player.held == egg, "picked up the egg")
+	main.energy = 100.0
+	main.jump_to(EraData.PREHISTORIC)
+	await frames(2)
+	check(main.prompt_text().contains("Restore"), "restore prompt in its home era")
+	var before_threat: float = main.threat
+	main.interact()
+	check(main.aberrations_fixed == 1 and main.threat < before_threat, "aberration restored, threat reduced")
 
 	print("Milestone complete: ", main.milestone_done)
 	check(main.milestone_done, "all first-playable objectives done")

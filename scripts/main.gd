@@ -32,6 +32,11 @@ const WEAPONS := [
 	{"id": "blink", "name": "Phase Blink", "hint": "short-range teleport"},
 ]
 const PISTOL_MAG := 12
+const HACK_COST := 10.0
+const DODGE_COOLDOWN := 2.5
+const MPH := 2.23694
+const TIME_JUMP_MPH := 88.0
+const ABERRATIONS := EraData.ABERRATIONS
 const STASIS_COST := 20.0
 const BLINK_COST := 15.0
 const BLINK_RANGE := 9.0
@@ -57,11 +62,11 @@ var seen_change := {}
 var era_props := {}
 var objectives: Array = [
 	{"id": "rewind", "text": "Throw an object (LMB), then hold R to rewind it", "done": false},
-	{"id": "freeze", "text": "Freeze traffic on an avenue (aim + F)", "done": false},
+	{"id": "freeze", "text": "Freeze traffic on an avenue (aim + Q)", "done": false},
 	{"id": "jump", "text": "Open the Time Pad (Tab) and jump to another era", "done": false},
 	{"id": "plant", "text": "Plant the oak seed in 1890 Founders' Square", "done": false},
 	{"id": "see", "text": "Return to 2025 and see what changed", "done": false},
-	{"id": "evade", "text": "Shake off the Time Cop (outrun, or freeze/stun + jump)", "done": false},
+	{"id": "evade", "text": "Shake off the Time Cop (outrun, freeze or fight)", "done": false},
 ]
 var messages: Array = []
 var banner := {}
@@ -83,6 +88,16 @@ var reload_timer := 0.0
 var attack_cooldown := 0.0
 var grenades: Array = []
 var effects: Array = []
+var dialed_era := -1     # destination set on the Time Pad while driving
+var profile := {}        # Profiler readout for the citizen under the crosshair
+var aberrations_fixed := 0
+var stutter := 0.0       # active time stutter (world hangs)
+var stutter_timer := 45.0
+var dodge_cooldown := 0.0
+var dodge_flash := 0.0
+var hit_flash := 0.0   # HUD hit-marker
+var hurt_flash := 0.0  # HUD damage vignette
+var kick := 0.0        # crosshair spread after firing
 var pad_open := false
 var pad_index := EraData.PRESENT
 var user_speed := 1.0
@@ -143,7 +158,8 @@ func _setup_input() -> void:
 		"move_up": [KEY_W, KEY_UP], "move_down": [KEY_S, KEY_DOWN],
 		"move_left": [KEY_A, KEY_LEFT], "move_right": [KEY_D, KEY_RIGHT],
 		"jump": [KEY_SPACE], "sprint": [KEY_SHIFT],
-		"interact": [KEY_E], "rewind": [KEY_R], "freeze": [KEY_F],
+		"interact": [KEY_E], "rewind": [KEY_R], "freeze": [KEY_Q],
+		"vehicle": [KEY_F], "hack": [KEY_T], "dodge": [KEY_C],
 		"slot_1": [KEY_1], "slot_2": [KEY_2], "slot_3": [KEY_3], "slot_4": [KEY_4], "slot_5": [KEY_5],
 		"time_pad": [KEY_TAB],
 		"ledger": [KEY_L], "help": [KEY_H], "pause": [KEY_ESCAPE, KEY_P],
@@ -227,8 +243,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.is_action_pressed("throw") or event.is_action_pressed("interact"):
 			pad_confirm()
 		return
+	if event.is_action_pressed("vehicle"):
+		toggle_vehicle()
+		return
+	if player.driving:
+		return
 	if slot >= 0 and slot < WEAPONS.size():
 		select_weapon(slot)
+		return
+	if event.is_action_pressed("hack"):
+		hack_aim(player.aim_origin(), player.aim_dir())
+		return
+	if event.is_action_pressed("dodge"):
+		time_dodge()
 		return
 	if event.is_action_pressed("throw"):
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
@@ -287,15 +314,26 @@ func _physics_process(delta: float) -> void:
 		complete("rewind")
 	_update_weapons(delta)
 
-	for v in vehicles_root.get_children():
-		v.step(delta)
+	_update_stutter(delta)
+	if stutter <= 0.0:
+		for v in vehicles_root.get_children():
+			v.step(delta)
 	_vehicle_collisions()
+	if player.driving:
+		_update_driving()
+	dodge_cooldown = maxf(dodge_cooldown - delta, 0.0)
+	_update_profile()
 	_update_bureau(delta)
 	_update_threat(delta)
 	_update_beacon()
 
 
 func _process(delta: float) -> void:
+	var real := delta / maxf(Engine.time_scale, 0.01)
+	hit_flash = maxf(hit_flash - real, 0.0)
+	dodge_flash = maxf(dodge_flash - real * 2.0, 0.0)
+	hurt_flash = maxf(hurt_flash - real, 0.0)
+	kick = maxf(kick - real * 4.0, 0.0)
 	for m in messages:
 		m.t -= delta
 	messages = messages.filter(func(m): return m.t > 0.0)
@@ -307,17 +345,18 @@ func _process(delta: float) -> void:
 
 func _vehicle_collisions() -> void:
 	for v in vehicles_root.get_children():
-		if v.frozen > 0.0:
+		if v.frozen > 0.0 or v.stall > 0.0 or v.parked or stutter > 0.0:
 			continue
-		if player.stun <= 0.0 and v.hits(player.global_position, 0.5):
+		if player.stun <= 0.0 and not player.driving and not player.dashing() and v.hits(player.global_position, 0.5):
 			var side := signf(player.global_position.x - v.position.x)
 			if side == 0.0:
 				side = 1.0
 			player.knock = Vector3(side * 12.0, 0, v.dir * 6.0)
 			player.velocity.y = 5.0
 			player.stun = 0.7
+			hurt_flash = 0.6
 			energy = maxf(energy - 10.0, 0.0)
-			push_message("Hit by a %s! Aim at traffic and press F to Stop Time." % v.label.to_lower(), Color("ff8a6b"))
+			push_message("Hit by a %s! Aim at traffic and press Q to Stop Time." % v.label.to_lower(), Color("ff8a6b"))
 		for p in props_root.get_children():
 			if not p.held and not p.sunk and v.hits(p.global_position, 0.3):
 				p.apply_central_impulse(Vector3(signf(p.global_position.x - v.position.x) * 3.0, 2.0, v.dir * v.speed) * p.mass)
@@ -345,6 +384,10 @@ func nearest_grabbable():
 
 
 func prompt_text() -> String:
+	if player.driving:
+		return ""
+	if player.held and ABERRATIONS.has(player.held.kind) and ABERRATIONS[player.held.kind].home == era:
+		return "[E] Restore the %s to its era" % ABERRATIONS[player.held.kind].name.to_lower()
 	if player.held:
 		if player.held.kind == "seed" and near_plot():
 			return "[E] Plant the oak seed"
@@ -352,6 +395,9 @@ func prompt_text() -> String:
 	var p = nearest_grabbable()
 	if p:
 		return "[E] Pick up %s" % p.display_name()
+	var v = nearest_vehicle()
+	if v:
+		return "[F] Hijack %s" % v.label.to_lower()
 	if hdist(player.global_position, EraData.NPC_POS) < 4.0:
 		return "[E] Talk to %s" % EraData.npc_line(era, flags.oak_planted).name
 	return ""
@@ -360,6 +406,9 @@ func prompt_text() -> String:
 func interact() -> void:
 	if player.held:
 		var h = player.held
+		if ABERRATIONS.has(h.kind) and ABERRATIONS[h.kind].home == era:
+			restore_aberration()
+			return
 		if h.kind == "seed" and near_plot():
 			plant_seed()
 			return
@@ -447,10 +496,207 @@ func set_pad_open(open: bool) -> void:
 func pad_confirm() -> void:
 	var target := pad_index
 	set_pad_open(false)
+	if player.driving:
+		# Back to the Future rules: dial the destination, then hit 88 mph
+		if target == era:
+			dialed_era = -1
+			push_message("Destination cleared.")
+		else:
+			dialed_era = target
+			push_message("Destination set: %s. Get this thing up to 88 mph!" % EraData.era_info(target).year_label, Color("ffb347"), 4.0)
+		return
 	jump_to(target)
 
 
 # ---------------------------------------------------------------- weapons & gadgets
+
+# ---------------------------------------------------------------- vehicles (GTA / Back to the Future)
+
+func nearest_vehicle():
+	var best = null
+	var best_d := 4.5
+	for v in vehicles_root.get_children():
+		var d := hdist(v.global_position, player.global_position)
+		if d < best_d:
+			best = v
+			best_d = d
+	return best
+
+
+func toggle_vehicle() -> void:
+	if player.driving:
+		player_exit_vehicle()
+		return
+	if player.held:
+		push_message("Drop what you're carrying first.")
+		return
+	var v = nearest_vehicle()
+	if v == null:
+		push_message("No vehicle close enough to hijack.")
+		return
+	v.driven = true
+	v.frozen = 0.0
+	player.enter_vehicle(v, v.top_speed)
+	dialed_era = -1
+	if era != EraData.PREHISTORIC:
+		add_threat(3.0, "Vehicle theft")
+	var hint := "Set a destination on the Time Pad, then hit 88 mph." if v.top_speed * MPH >= TIME_JUMP_MPH else "Too slow for a time jump - find something that can do 88 mph."
+	push_message("Hijacked a %s. %s" % [v.label.to_lower(), hint], Color("ffb347"), 5.0)
+
+
+func player_exit_vehicle() -> void:
+	var v = player.exit_vehicle()
+	vehicles_root.add_child(v)
+	v.driven = false
+	v.parked = true
+	player.global_position = find_free_pos(player.global_position)
+	dialed_era = -1
+
+
+func _update_driving() -> void:
+	var mph: float = absf(player.car_speed) * MPH
+	# ram agents and props
+	if cop and cop.state == "chase" and mph > 15.0 and hdist(cop.global_position, player.global_position) < 3.2:
+		damage_cop(50.0, 2.0, "vehicle")
+	for p in props_root.get_children():
+		if not p.held and not p.sunk and mph > 8.0 and hdist(p.global_position, player.global_position) < 2.8:
+			var fwd := Vector3(sin(player.car_yaw), 0.3, cos(player.car_yaw))
+			p.apply_central_impulse(fwd * absf(player.car_speed) * 0.6 * p.mass)
+	if dialed_era >= 0 and mph >= TIME_JUMP_MPH:
+		if energy < JUMP_COST:
+			push_message("88 mph - but not enough Chrono Energy for the jump!", Color("ffb347"), 1.0)
+			return
+		var target := dialed_era
+		dialed_era = -1
+		_spawn_fire_trails()
+		jump_to(target)
+		show_banner("88 MILES PER HOUR", "Temporal displacement complete. Welcome to %s." % EraData.era_info(era).year_label)
+
+
+## Twin burning tyre tracks left behind by an 88 mph jump.
+func _spawn_fire_trails() -> void:
+	var fwd := Vector3(sin(player.car_yaw), 0, cos(player.car_yaw))
+	var side := Vector3(fwd.z, 0, -fwd.x)
+	for s in [-0.9, 0.9]:
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(0.35, 0.5, 30.0)
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = _glow_mat(Color("ff7a1a"), 0.9)
+		add_child(mi)
+		mi.global_position = player.global_position - fwd * 16.0 + side * s + Vector3(0, 0.25, 0)
+		mi.look_at(mi.global_position + fwd, Vector3.UP)
+		effects.append({"node": mi, "t": 6.0, "life": 6.0, "grow": 0.0})
+
+
+# ---------------------------------------------------------------- hacking (Watch_Dogs) & dodge (Quantum Break)
+
+## The citizen nearest the crosshair ray, if any.
+func _aimed_walker(origin: Vector3, dir: Vector3):
+	var best = null
+	var best_t := 35.0
+	for w in city.walkers:
+		var c: Vector3 = w.node.global_position + Vector3(0, 1.2, 0)
+		var t := (c - origin).dot(dir)
+		if t > 0.0 and t < best_t and (origin + dir * t).distance_to(c) < 0.9:
+			best = w
+			best_t = t
+	return best
+
+
+func _update_profile() -> void:
+	profile = {}
+	if player.driving or pad_open:
+		return
+	var w = _aimed_walker(player.aim_origin(), player.aim_dir())
+	if w:
+		profile = EraData.citizen_bio(era, w.idx)
+
+
+func hack_aim(origin: Vector3, dir: Vector3) -> void:
+	dir = dir.normalized()
+	if energy < HACK_COST:
+		push_message("Hacking needs %d Chrono Energy." % int(HACK_COST), Color("ffb347"))
+		return
+	if cop and cop.state == "chase" and _ray_dist(origin, dir, cop.global_position + Vector3(0, 1, 0)) < 2.5:
+		energy -= HACK_COST
+		cop.jammed = 2.0 if cop.hunter else 5.0
+		hit_flash = 0.25
+		push_message("Bureau uplink jammed for %ds - it can't track your jumps." % int(cop.jammed), Color("9fe4ff"))
+		return
+	var v = _ray_pick_vehicle(origin, dir, 70.0)
+	if v:
+		if era == EraData.PREHISTORIC or era == EraData.PAST:
+			push_message("Nothing to hack - a %s has no electronics." % v.label.to_lower())
+			return
+		energy -= HACK_COST
+		v.stall = 6.0
+		push_message("Hacked: %s stalled for 6s." % v.label, Color("9fe4ff"))
+		return
+	var w = _aimed_walker(origin, dir)
+	if w:
+		if era == EraData.FUTURE:
+			energy = minf(energy + 25.0 - HACK_COST, MAX_ENERGY)
+			add_threat(3.0, "Siphoned energy from a citizen's implant")
+			push_message("Implant hacked: +25 Chrono Energy siphoned.", Color("9fe4ff"))
+		else:
+			var bio := EraData.citizen_bio(era, w.idx)
+			push_message("%s - %s" % [bio.name, bio.line], Color("9fe4ff"), 5.0)
+		return
+	push_message("No hackable target in your sights.")
+
+
+func _ray_dist(origin: Vector3, dir: Vector3, p: Vector3) -> float:
+	var t := (p - origin).dot(dir)
+	if t < 0.0:
+		return INF
+	return (origin + dir * t).distance_to(p)
+
+
+func time_dodge() -> void:
+	if dodge_cooldown > 0.0:
+		return
+	var input := Input.get_vector("move_left", "move_right", "move_up", "move_down")
+	var dir: Vector3 = Basis(Vector3.UP, player.yaw) * Vector3(input.x, 0, input.y)
+	if dir.length() < 0.1:
+		dir = Basis(Vector3.UP, player.yaw) * Vector3(0, 0, -1)
+	_spawn_burst(player.global_position + Vector3(0, 1, 0), Color("9fe4ff"), 1.4)
+	player.dash(dir)
+	dodge_cooldown = DODGE_COOLDOWN
+	dodge_flash = 0.4
+
+
+## Quantum Break-style stutters: every so often the city hangs for a moment.
+func _update_stutter(delta: float) -> void:
+	if stutter > 0.0:
+		stutter -= delta
+		if stutter <= 0.0:
+			city.time_frozen = false
+		return
+	stutter_timer -= delta
+	if stutter_timer <= 0.0:
+		stutter_timer = randf_range(40.0, 75.0)
+		stutter = 2.5
+		city.time_frozen = true
+		push_message("Time stutter - the Missing Minute is spreading. Only you and the Bureau keep moving.", Color("9fe4ff"), 4.0)
+
+
+# ---------------------------------------------------------------- aberrations (Legends of Tomorrow)
+
+func restore_aberration() -> void:
+	var h = player.held
+	var ab: Dictionary = ABERRATIONS[h.kind]
+	player.held = null
+	h.queue_free()
+	aberrations_fixed += 1
+	threat = maxf(threat - 15.0, 0.0)
+	last_tier = tier()
+	add_event("aberration", "%s returned to %s" % [ab.name, EraData.era_info(era).year_label],
+		"You restored an out-of-time object", 1, "Timeline stabilised; Bureau threat reduced")
+	_spawn_burst(player.global_position + Vector3(0, 1, 0), Color("ffb347"), 3.0)
+	show_banner("ABERRATION RESTORED (%d/%d)" % [aberrations_fixed, ABERRATIONS.size()],
+		"The %s is back where it belongs. The timeline steadies and the Bureau eases off (-15 threat)." % ab.name.to_lower())
+
 
 func select_weapon(i: int) -> void:
 	weapon = i
@@ -500,6 +746,7 @@ func _fire_pistol(origin: Vector3, dir: Vector3) -> void:
 		return
 	pistol_ammo -= 1
 	attack_cooldown = 0.18
+	kick = 1.0
 	var hit := _raycast(origin + dir * 1.0, dir, 120.0, 1 | 8 | 16)
 	var end: Vector3 = origin + dir * 120.0
 	var collider = null
@@ -585,6 +832,11 @@ func _blink(dir: Vector3) -> void:
 
 func damage_cop(amount: float, stun: float, source: String) -> void:
 	if cop == null or cop.state == "portal":
+		return
+	hit_flash = 0.25
+	if cop.hunter:
+		cop.stunned = maxf(cop.stunned, stun * 0.5)
+		push_message("%s hit - the HK unit staggers. It cannot be destroyed." % source, Color("ff8a8a"), 1.5)
 		return
 	cop.hp -= amount
 	cop.stunned = maxf(cop.stunned, stun)
@@ -707,12 +959,14 @@ func jump_to(target: int) -> void:
 		if cop.state == "portal":
 			cop_cooldown = 6.0
 			push_message("The Bureau portal collapsed behind you - they'll re-acquire you soon.", Color("ffb07a"))
-		elif cop.can_track() and hdist(cop.global_position, player.global_position) < FOLLOW_RANGE:
+		elif cop.can_track() and hdist(cop.global_position, player.global_position) < (FOLLOW_RANGE * 2.4 if cop.hunter else FOLLOW_RANGE):
 			tracked = true
 		elif cop.frozen > 0.0:
 			shook_off = "you froze the agent and jumped"
 		elif cop.stunned > 0.0:
 			shook_off = "you stunned the agent and jumped"
+		elif cop.jammed > 0.0:
+			shook_off = "you jammed its tracking and jumped"
 		else:
 			shook_off = "you jumped while out of the agent's tracking range"
 		_remove_cop()
@@ -724,6 +978,8 @@ func jump_to(target: int) -> void:
 	else:
 		add_threat(2.0, "Era jump detected")
 	last_jump_time = clock
+	if player.driving and player.vehicle.era != target:
+		add_threat(12.0, "Anachronism: a %s appears in %s" % [player.vehicle_label.to_lower(), EraData.era_info(target).year_label])
 	if player.held and player.held.kind == "cell" and target < EraData.FUTURE and not flags.cell_anachronism:
 		flags.cell_anachronism = true
 		var from_year: String = EraData.era_info(era).year_label
@@ -921,11 +1177,22 @@ func _update_bureau(delta: float) -> void:
 		return
 	if cop == null:
 		if tier() >= 2 and cop_cooldown <= 0.0:
-			_spawn_cop(_portal_spot(), 2.5)
-			push_message("!! Bureau portal opening nearby - run, hide, or fight with time.", Color("ff6b6b"), 4.0)
+			_spawn_cop(_portal_spot(), 3.5 if tier() >= 3 else 2.5)
+			if cop.hunter:
+				push_message("!! The Bureau sent a HUNTER-KILLER. It can't be destroyed - only slowed or escaped.", Color("ff4d5e"), 6.0)
+			else:
+				push_message("!! Bureau portal opening nearby - run, hide, or fight with time.", Color("ff6b6b"), 4.0)
 		return
-	if cop.step(delta, player.global_position):
+	if cop.step(delta, player.global_position) and not player.dashing():
+		if player.driving:
+			# an agent can't grab a moving car; it gets thrown aside
+			if absf(player.car_speed) > 6.0:
+				damage_cop(45.0, 1.5, "vehicle")
+				return
+			player_exit_vehicle()
 		arrest()
+		return
+	if cop == null:
 		return
 	if cop.state != "chase":
 		return
@@ -937,7 +1204,7 @@ func _update_bureau(delta: float) -> void:
 			add_threat(4.0, "Assaulted a Bureau agent")
 	if hdist(cop.global_position, player.global_position) > EVADE_RANGE:
 		evade_timer += delta
-		if evade_timer > 4.0:
+		if evade_timer > (7.0 if cop.hunter else 4.0):
 			resolve_hunt("you outran the agent and broke its trail")
 	else:
 		evade_timer = 0.0
@@ -961,6 +1228,7 @@ func _portal_spot() -> Vector3:
 func _spawn_cop(pos: Vector3, portal_seconds: float) -> void:
 	_remove_cop()
 	cop = TimeCop.new()
+	cop.hunter = tier() >= 3
 	cop.position = pos
 	cop.path_provider = find_path
 	add_child(cop)
@@ -988,6 +1256,7 @@ func resolve_hunt(method: String, threat_after := 30.0, cooldown := 20.0) -> voi
 
 func arrest() -> void:
 	arrests += 1
+	hurt_flash = 1.2
 	if player.held:
 		player.held.set_held(false)
 		player.held = null
@@ -1012,6 +1281,10 @@ func bureau_status() -> String:
 			return "Agent frozen"
 		if cop.stunned > 0.0:
 			return "Agent stunned"
+		if cop.jammed > 0.0:
+			return "Tracking jammed %.1fs" % cop.jammed
+		if cop.hunter:
+			return "HK unit hunting (%dm)" % int(hdist(cop.global_position, player.global_position))
 		if evade_timer > 0.0:
 			return "Losing your trail... %.1fs" % (4.0 - evade_timer)
 		return "Agent in pursuit (%dm)" % int(hdist(cop.global_position, player.global_position))
@@ -1121,6 +1394,7 @@ func save_game() -> void:
 		"energy": energy, "threat": threat, "events": events, "flags": flags,
 		"seen_change": {"0": seen_change[0], "1": seen_change[1], "2": seen_change[2]},
 		"props": props_out, "held": player.held.kind if player.held else "",
+		"aberrations_fixed": aberrations_fixed,
 		"objectives": objectives.map(func(o): return o.done),
 		"escapes": escapes, "arrests": arrests,
 	}
@@ -1142,6 +1416,9 @@ func load_game() -> bool:
 		return false
 	_remove_cop()
 	follow_timer = -1.0
+	dialed_era = -1
+	if player.driving:
+		player.exit_vehicle().queue_free()
 	if player.held:
 		player.held.queue_free()
 		player.held = null
@@ -1160,6 +1437,7 @@ func load_game() -> bool:
 		objectives[i].done = data.objectives[i]
 	milestone_done = objectives.all(func(o): return o.done)
 	escapes = int(data.escapes)
+	aberrations_fixed = int(data.get("aberrations_fixed", 0))
 	arrests = int(data.arrests)
 	era = int(data.era)
 	player.global_position = Vector3(data.pos[0], data.pos[1], data.pos[2])

@@ -4,6 +4,7 @@ extends Node3D
 ## footprint rectangles so the Bureau's street pathfinding knows what is solid.
 
 const EraData = preload("res://scripts/era_data.gd")
+const Humanoid = preload("res://scripts/humanoid.gd")
 
 const LAYER_WORLD := 1
 const LAYER_PLAYER_BARRIER := 2
@@ -16,6 +17,8 @@ var _solids: StaticBody3D
 var _mats := {}
 var _hands: Array = []
 var _flyers: Array = []
+var walkers: Array = []
+var time_frozen := false  # time stutter: citizens hang mid-step
 var _t := 0.0
 
 
@@ -29,6 +32,7 @@ func build(new_era: int, is_changed: bool) -> void:
 	obstacles.clear()
 	_hands.clear()
 	_flyers.clear()
+	walkers.clear()
 	_mats.clear()
 	_solids = StaticBody3D.new()
 	_solids.collision_layer = LAYER_WORLD
@@ -47,10 +51,22 @@ func build(new_era: int, is_changed: bool) -> void:
 	if era == EraData.PAST:
 		_build_stall()
 	_build_npc()
+	_build_crowd()
 
 
 func _process(delta: float) -> void:
 	_t += delta
+	for w in walkers:
+		if time_frozen:
+			continue
+		w.t += delta * w.speed / w.length * w.dir
+		if w.t > 1.0 or w.t < 0.0:
+			w.t = clampf(w.t, 0.0, 1.0)
+			w.dir = -w.dir
+		var heading: Vector3 = (w.b - w.a) * w.dir
+		w.node.position = w.a.lerp(w.b, w.t)
+		w.node.rotation.y = atan2(heading.x, heading.z)
+		w.node.animate(delta, w.speed)
 	for h in _hands:
 		h.node.rotation.z = -_t * h.speed
 	for f in _flyers:
@@ -290,7 +306,8 @@ func _build_streets() -> void:
 				continue
 			_mesh(pole_mesh, corner + Vector3(0, 2.5, 0), pole)
 			_mesh(head, corner + Vector3(0, 5.1, 0), lamp)
-			_label("%s & %s" % [EraData.avenue_name(i), EraData.street_name(j)], corner + Vector3(0, 3.6, 0), 40, 45.0, Color("d8f0ff"))
+			var sign := _label("%s & %s" % [EraData.avenue_name(i), EraData.street_name(j)], corner + Vector3(0, 3.6, 0), 40, 45.0, Color("d8f0ff"))
+			sign.pixel_size = 0.012
 
 
 func _build_buildings() -> void:
@@ -495,12 +512,44 @@ func _build_stall() -> void:
 
 func _build_npc() -> void:
 	var p := EraData.NPC_POS
-	var body := CapsuleMesh.new()
-	body.radius = 0.35
-	body.height = 1.7
-	var col: Color = {EraData.FUTURE: Color("9fb3c8"), EraData.WASTELAND: Color("8a6a50"), EraData.PREHISTORIC: Color("c0a080")}.get(era, Color("d9a066"))
-	_mesh(body, p + Vector3(0, 0.85, 0), _mat(col))
+	var npc := Humanoid.new()
+	add_child(npc)
+	npc.build(EraData.npc_outfit(era))
+	npc.position = p
+	npc.rotation.y = PI  # face the player's starting street
+	npc.animate(0.016, 0.0)
 	_label(EraData.npc_line(era, changed).name, p + Vector3(0, 2.3, 0), 40, 40.0, Color("ffe7a8"))
+
+
+## Citizens walking the sidewalks around Founders' Square, dressed for the era.
+func _build_crowd() -> void:
+	var count: int = {EraData.PREHISTORIC: 0, EraData.WASTELAND: 14}.get(era, 26)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 900 + era
+	var off_ave := EraData.AVE_WIDTH / 2.0 + 2.5
+	var off_st := EraData.ST_WIDTH / 2.0 + 2.5
+	for k in range(count):
+		var a: Vector3
+		var b: Vector3
+		if rng.randf() < 0.5:
+			var i := rng.randi_range(1, 4)
+			var j := rng.randi_range(3, 8)
+			var x := i * EraData.AVE_SPACING + off_ave * (1.0 if rng.randf() < 0.5 else -1.0)
+			a = Vector3(x, 0, j * EraData.ST_SPACING + 8.0)
+			b = Vector3(x, 0, (j + 1) * EraData.ST_SPACING - 8.0)
+		else:
+			var i := rng.randi_range(0, 4)
+			var j := rng.randi_range(3, 9)
+			var z := j * EraData.ST_SPACING + off_st * (1.0 if rng.randf() < 0.5 else -1.0)
+			a = Vector3(i * EraData.AVE_SPACING + 13.0, 0, z)
+			b = Vector3((i + 1) * EraData.AVE_SPACING - 13.0, 0, z)
+		var o := EraData.citizen_outfit(era, rng)
+		o.lod_range = 90.0
+		var h := Humanoid.new()
+		add_child(h)
+		h.build(o)
+		walkers.append({"node": h, "idx": k, "a": a, "b": b, "t": rng.randf(), "dir": 1.0 if rng.randf() < 0.5 else -1.0,
+			"speed": rng.randf_range(1.1, 1.8), "length": a.distance_to(b)})
 
 
 ## Wasteland: the same lots as broken, leaning stumps and rubble.

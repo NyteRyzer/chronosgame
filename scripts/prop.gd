@@ -50,7 +50,7 @@ func _ready() -> void:
 			sm.radius = 0.25
 			sm.height = 0.5
 			_mesh.mesh = sm
-			var c := Color("6fbf4a") if kind == "seed" else Color("2ee6d6")
+			var c: Color = {"seed": Color("6fbf4a"), "cell": Color("2ee6d6"), "phone": Color("9fc8ff"), "egg": Color("f0e2b6"), "gear": Color("d8a640")}.get(kind, Color.WHITE)
 			mat.albedo_color = c
 			mat.emission_enabled = true
 			mat.emission = c
@@ -90,6 +90,8 @@ func display_name() -> String:
 			return "Plasma cell (2150 tech)"
 		"rock":
 			return "Rock"
+		"phone", "egg", "gear":
+			return "%s (aberration)" % EraData.ABERRATIONS[kind].name
 		"scrap":
 			return "Scrap"
 	return "Crate"
