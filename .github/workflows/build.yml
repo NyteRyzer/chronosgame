@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  test-and-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot + export templates
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -sSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          curl -sSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          dest="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$dest"
+          unzip -qj templates.tpz templates/linux_release.x86_64 templates/linux_debug.x86_64 \
+            templates/macos.zip templates/version.txt -d "$dest"
+          rm templates.tpz godot.zip
+
+      - name: Import project
+        run: ./godot --headless --import || true
+
+      - name: Milestone test
+        run: ./godot --headless -s tests/milestone_test.gd
+
+      - name: Export Linux + macOS
+        run: |
+          mkdir -p build/linux build/macos
+          ./godot --headless --export-release "Linux" build/linux/CHRONO.x86_64
+          ./godot --headless --export-release "macOS" build/macos/CHRONO.zip
+          tar -czf CHRONO-linux-x86_64.tar.gz -C build/linux CHRONO.x86_64
+          cp build/macos/CHRONO.zip CHRONO-macos-universal.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CHRONO-linux-x86_64
+          path: CHRONO-linux-x86_64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CHRONO-macos-universal
+          path: CHRONO-macos-universal.zip
