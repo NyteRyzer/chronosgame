@@ -6,7 +6,7 @@ config_version=5
 [application]
 
 config/name="CHRONO: Shattered Timeline"
-config/description="Open-world time-travel sandbox prototype: rewind, freeze, era jumps, causality, and the Chrono Enforcement Bureau."
+config/description="3D open-world time-travel sandbox in a Manhattan-style city: rewind, freeze, era jumps, causality, and the Chrono Enforcement Bureau."
 config/version="0.1.0"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
