@@ -88,6 +88,7 @@ var reload_timer := 0.0
 var attack_cooldown := 0.0
 var grenades: Array = []
 var effects: Array = []
+var cruiser_state := {"era": EraData.PRESENT, "pos": Vector3(240, 0, 246), "yaw": PI / 2.0}  # where the Chrono Cruiser is parked
 var dialed_era := -1     # destination set on the Time Pad while driving
 var profile := {}        # Profiler readout for the citizen under the crosshair
 var aberrations_fixed := 0
@@ -320,6 +321,7 @@ func _physics_process(delta: float) -> void:
 			v.step(delta)
 	_vehicle_collisions()
 	if player.driving:
+		player.vehicle.animate(delta, player.car_speed)
 		_update_driving()
 	dodge_cooldown = maxf(dodge_cooldown - delta, 0.0)
 	_update_profile()
@@ -538,6 +540,10 @@ func toggle_vehicle() -> void:
 	v.frozen = 0.0
 	player.enter_vehicle(v, v.top_speed)
 	dialed_era = -1
+	if v.kind == "cruiser":
+		cruiser_state.era = -1
+		push_message("Chrono Cruiser online. Flux core charged. Dial a destination (Tab) and hit 88 mph.", Color("5fd4ff"), 5.0)
+		return
 	if era != EraData.PREHISTORIC:
 		add_threat(3.0, "Vehicle theft")
 	var hint := "Set a destination on the Time Pad, then hit 88 mph." if v.top_speed * MPH >= TIME_JUMP_MPH else "Too slow for a time jump - find something that can do 88 mph."
@@ -549,6 +555,8 @@ func player_exit_vehicle() -> void:
 	vehicles_root.add_child(v)
 	v.driven = false
 	v.parked = true
+	if v.kind == "cruiser":
+		cruiser_state = {"era": era, "pos": v.global_position, "yaw": v.global_rotation.y}
 	player.global_position = find_free_pos(player.global_position)
 	dialed_era = -1
 
@@ -1035,6 +1043,12 @@ func _spawn_traffic() -> void:
 				vehicles_root.add_child(v)
 				var z := rng.randf_range(EraData.CITY_MIN.y + 10.0, EraData.CITY_MAX.y - 10.0)
 				v.setup(era, x + lane, z, dir, rng.randf_range(0.8, 1.2))
+	var own_car_driven: bool = player.driving and player.vehicle.kind == "cruiser"
+	if cruiser_state.era == era and not own_car_driven:
+		var c = Vehicle.new()
+		vehicles_root.add_child(c)
+		c.setup(era, cruiser_state.pos.x, cruiser_state.pos.z, 1.0, 1.0, "cruiser")
+		c.rotation.y = cruiser_state.yaw
 
 
 func _spawn_prop(kind: String, pos: Vector3, sunk := false) -> Prop:

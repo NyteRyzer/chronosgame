@@ -1,11 +1,46 @@
 # CHRONO: Shattered Timeline
 
-An open-world time-travel sandbox prototype built in **Godot 4.3**. This is the
-**first playable milestone** from the CHRONO game design bible:
+A third-person, open-world time-travel game built in **Godot 4.3**, set in
+**New Meridian**, a Manhattan-style grid city. It has numbered avenues and
+streets, a river, a clock-tower landmark and Founders' Square. The city exists
+in five eras on the same block footprints:
 
-> A player can rewind a thrown object, freeze a moving hazard, jump between three
-> versions of one street, plant an item in the past that appears changed in the
-> present, and trigger a Time Cop who follows them through an era jump.
+| Key | Era | Look | Traffic |
+|---|---|---|---|
+| 1 | Cretaceous, 66,000,000 BC | Jungle, Sentinel Rock, volcano, pterosaurs | Triceratops herds |
+| 2 | 1890 | Brownstones, gas lamps, top hats and bonnets | Horse-drawn carriages |
+| 3 | 2025 | Skyscrapers, yellow cabs | Yellow cabs |
+| 4 | 2150 | Neon megatowers, implants and visors | Hover-cars |
+| 5 | AD 30,000 | Ruined stumps, toxic river, wastelanders | Scrap crawlers |
+
+What you change in the past persists. If you plant the oak seed in 1890 Founders'
+Square, the 2025 parking garage is never built, 2150 grows a biodome, and the
+far-future wasteland keeps the last living trees on Earth.
+
+## Mechanics and inspirations
+
+- **Time Pad bracer (Tab)** on your left forearm. A radial dial jumps you between
+  the five eras, and the world slows while it's open.
+- **Back to the Future:** in a vehicle, set a destination on the Time Pad and hit
+  **88 mph**. Your own **Chrono Cruiser** (stainless gull-wing, flux core) is
+  parked by the square in 2025 and stays wherever and whenever you leave it.
+  Showing up in the wrong era in a car is an anachronism.
+- **GTA:** hijack anything on the road with **F**: cabs, carriages, hover-cars,
+  crawlers, even a triceratops. There's a wanted-style threat level from 0 to 5.
+- **Quantum Break:** **Q** Stop Time on the target in your sights, **C** Time
+  Dodge, **R** hold to rewind objects. Periodic time stutters freeze the city
+  around you.
+- **Watch_Dogs:** **T** hacks whatever is under the crosshair. It stalls cars,
+  jams a Bureau agent's tracking, or siphons energy from 2150 implants. Aiming at
+  a citizen shows a **Profiler** readout.
+- **Terminator:** at threat 3+, the Chrono Enforcement Bureau sends the
+  **HK-800 Hunter-Killer**, a chrome endoskeleton that can't be destroyed. You
+  can only stagger it, freeze or jam it, or escape it through time.
+- **Legends of Tomorrow:** the Bureau polices the timeline, and **aberrations**
+  (a smartphone in 1890, a dinosaur egg in 2150, a clockwork gear in the
+  wasteland) can be carried home and restored to calm the hunt.
+- **Weapons (1-4):** Chrono Blade, Pulse Pistol, Stasis Grenade (freezes a 9 m
+  area), Phase Blink.
 
 ## Play
 
@@ -25,52 +60,42 @@ Or open `project.godot` in the Godot 4.3 editor and press F5.
 
 | Input | Action |
 |---|---|
-| WASD / arrows | Move |
-| Mouse | Aim |
-| E | Pick up / drop / plant / talk |
-| Left click | Throw the held object |
-| R (hold) | **Rewind** tracked objects near you |
-| F | **Stop Time** on the target under the cursor |
-| 1 / 2 / 3 | **Era Jump** to 1890 / 2025 / 2150 |
-| L | Timeline Ledger |
-| H | Help |
+| WASD, Shift, Space | Move, sprint, jump |
+| Mouse | Look and aim (click to capture) |
+| Tab | Time Pad era dial (1-5 / wheel + click) |
+| 1-4 / wheel | Weapons and gadgets |
+| Left click | Attack, or throw what you're holding |
+| E | Pick up / drop / plant / talk / restore aberration |
+| F | Hijack or exit a vehicle (W/S throttle, A/D steer, Space brake) |
+| Q / R / C / T | Stop Time / Rewind (hold) / Time Dodge / Hack |
+| L / H / Esc | Timeline ledger / help / pause |
 | F5 / F9 | Save / load |
 | [ / ] | Game speed (accessibility) |
-| Esc / P | Pause |
-
-## The milestone loop
-
-1. Throw a crate into the canal, then hold **R** to bring it back.
-2. Freeze the vehicle on the road with **F** to cross safely.
-3. Jump to **1890** with **1**, grab the oak seed from the market stall, and plant it
-   in the Old Square soil.
-4. Jump to **2025** with **2**. The parking lot is now Founders' Oak Park. In **2150**
-   the ruined plaza is the Oak Biodome.
-5. Altering history raises your threat to *Wanted Across Time*, and a Chrono
-   Enforcement Bureau agent comes through a telegraphed portal. If it's close and
-   able to track you when you jump, it follows you into the next era.
-6. To lose it, outrun it, or stun it with a thrown crate or freeze it and then jump.
-   If it catches you, you are arrested.
 
 ## Project layout
 
 | Path | Purpose |
 |---|---|
-| `scripts/main.gd` | Orchestrator: powers, era jumps, causality events, threat, Bureau AI, save/load |
-| `scripts/era_data.gd` | Authored era snapshots (layouts, palettes, NPC lines, props) |
-| `scripts/world_view.gd` | Draws the current era and owns its colliders |
-| `scripts/prop.gd` | Rewindable objects (5-second rolling state buffer) |
-| `scripts/hazard.gd` | Freezable road vehicle |
-| `scripts/time_cop.gd` | Bureau agent: portal → chase, freeze/stun states |
-| `scripts/hud.gd` | ChronoCore UI: era/branch, energy, threat (text + shapes), ledger, help |
-| `tests/milestone_test.gd` | Headless end-to-end test of the whole milestone |
+| `scripts/main.gd` | Orchestrator: Time Pad, powers, weapons, vehicles, hacking, causality, threat, Bureau AI, save/load |
+| `scripts/era_data.gd` | Authored data for every era: palettes, layouts, outfits, NPCs, aberrations, profiler bios |
+| `scripts/city.gd` | Builds an era's city, square, crowd and colliders |
+| `scripts/humanoid.gd` | Procedural jointed human with a walk cycle (player, agents, HK unit, citizens) |
+| `scripts/vehicle.gd`, `scripts/mesh_kit.gd` | Vehicle models (extruded silhouettes), traffic and animation |
+| `scripts/player.gd` | Third-person controller, driving, dodge, bracer and weapon rig |
+| `scripts/time_cop.gd` | Bureau agent / Hunter-Killer: portal, street-grid pursuit, freeze/stun/jam |
+| `scripts/hud.gd` | Futuristic HUD: holo-panels, compass, minimap, Time Pad dial, speedometer, profiler |
+| `scripts/prop.gd` | Rewindable physics objects |
+| `tests/milestone_test.gd` | Headless end-to-end test (78 checks) |
+| `fonts/` | Orbitron and Rajdhani (SIL Open Font License) |
 
-All visuals are drawn in code, so the project has no art assets yet.
+Every model and visual is generated in code, so the project has no imported 3D
+assets.
 
 ## Develop
 
 ```sh
-godot --headless -s tests/milestone_test.gd              # run the milestone test
+godot --headless --import                                 # first run: import fonts
+godot --headless -s tests/milestone_test.gd               # run the test suite
 godot --headless --export-release "Linux" build/linux/CHRONO.x86_64
 godot --headless --export-release "macOS" build/macos/CHRONO.zip
 ```

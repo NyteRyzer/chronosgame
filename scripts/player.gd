@@ -104,7 +104,7 @@ func _glow(c: Color) -> StandardMaterial3D:
 	m.albedo_color = c
 	m.emission_enabled = true
 	m.emission = c
-	m.emission_energy_multiplier = 2.0
+	m.emission_energy_multiplier = 1.2
 	return m
 
 

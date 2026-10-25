@@ -7,7 +7,8 @@ extends Node3D
 ## "bald"), top, bottom, shoes, coat (Color), dress (bool), hat ("top", "bowler",
 ## "cap", "helmet", "hood", "bonnet"), hat_color, visor (Color, glowing),
 ## goggles (bool), trim (Color, glowing suit lines), pads (bool), badge (bool),
-## scarf (Color), height (scale), build (width scale).
+## scarf (Color), gloves (Color), eyes (Color, glowing), collar (bool), hero
+## (bool: belt pouches + shoulder plates), chrome (bool), height, build.
 
 var right_hand: Node3D
 var left_forearm: Node3D
@@ -40,104 +41,129 @@ func build(o: Dictionary) -> void:
 	var top: Color = o.get("top", Color("4a5a7a"))
 	var bottom: Color = o.get("bottom", Color("2a2e38"))
 	var shoes: Color = o.get("shoes", Color("1a1a1a"))
+	var hands: Color = o.get("gloves", skin)
 	var dress: bool = o.get("dress", false)
+	var coat_col = o.get("coat", null)
+	var hair: Color = o.get("hair", Color("2a1c12"))
 
-	# legs
+	# ---- legs: tapered thigh/shin, knee caps, shaped shoes
 	for side in [-1.0, 1.0]:
-		var hip := _joint(self, Vector3(side * 0.1, 0.92, 0))
+		var hip := _joint(self, Vector3(side * 0.1, 0.93, 0))
 		_hips.append(hip)
-		_limb(hip, 0.4, 0.075, bottom)
-		var knee := _joint(hip, Vector3(0, -0.42, 0))
+		_part(hip, _cyl(0.085, 0.062, 0.44), Vector3(0, -0.21, 0), bottom)
+		var knee := _joint(hip, Vector3(0, -0.43, 0))
 		_knees.append(knee)
-		_limb(knee, 0.4, 0.065, bottom)
-		_part(knee, _box(Vector3(0.12, 0.08, 0.26)), Vector3(0, -0.45, 0.05), shoes)
+		_part(knee, _sphere(0.064), Vector3(0, 0, 0.005), bottom)
+		_part(knee, _cyl(0.06, 0.045, 0.42), Vector3(0, -0.2, 0), bottom)
+		_part(knee, _box(Vector3(0.1, 0.07, 0.2)), Vector3(0, -0.45, 0.03), shoes)
+		_part(knee, _sphere(0.052), Vector3(0, -0.45, 0.13), shoes, Vector3(1, 0.7, 1))
+		_part(knee, _box(Vector3(0.11, 0.025, 0.26)), Vector3(0, -0.49, 0.04), shoes.darkened(0.4))
 
-	# torso
+	# ---- torso: V-shaped chest, waist, pelvis, belt
 	_torso = _joint(self, Vector3(0, 0.92, 0))
-	_part(_torso, _box(Vector3(0.34, 0.2, 0.2)), Vector3(0, 0.08, 0), bottom)  # pelvis
-	_part(_torso, _capsule(0.17, 0.55), Vector3(0, 0.3, 0), top, Vector3(1.25, 1, 0.75))
-	if o.has("coat"):
-		# long coat: a slightly larger torso shell that flares past the hips
-		_part(_torso, _capsule(0.185, 0.62), Vector3(0, 0.3, -0.005), o.coat, Vector3(1.28, 1, 0.82))
-		var hem := CylinderMesh.new()
-		hem.top_radius = 0.2
-		hem.bottom_radius = 0.27
-		hem.height = 0.42
-		_part(_torso, hem, Vector3(0, -0.12, 0), o.coat, Vector3(1.1, 1, 0.8))
-		_part(_torso, _box(Vector3(0.1, 0.4, 0.02)), Vector3(0, 0.36, 0.15), top)  # shirt showing
+	_part(_torso, _box(Vector3(0.3, 0.16, 0.18)), Vector3(0, 0.05, 0), bottom)
+	_part(_torso, _cyl(0.155, 0.15, 0.2), Vector3(0, 0.18, 0), top, Vector3(1.12, 1, 0.72))
+	_part(_torso, _cyl(0.2, 0.155, 0.36), Vector3(0, 0.44, 0), top, Vector3(1.22, 1, 0.68))
+	_part(_torso, _sphere(0.17), Vector3(0, 0.6, 0), top, Vector3(1.4, 0.45, 0.78))  # shoulder line
+	if not dress:
+		_part(_torso, _cyl(0.162, 0.162, 0.05), Vector3(0, 0.1, 0), Color("1a1612"), Vector3(1.12, 1, 0.75))
+		_part(_torso, _box(Vector3(0.06, 0.045, 0.02)), Vector3(0, 0.1, 0.125), _mat(Color("c8b070"), false, 0.9))
+	if o.get("hero", false):
+		# utility belt pouches and shoulder plates for the time traveller
+		for side in [-1.0, 1.0]:
+			_part(_torso, _box(Vector3(0.07, 0.08, 0.06)), Vector3(side * 0.14, 0.08, 0.1), Color("2a2622"))
+			_part(_torso, _box(Vector3(0.14, 0.04, 0.16)), Vector3(side * 0.22, 0.63, 0), Color("3a4258"), Vector3.ONE, Vector3(0, 0, side * -18))
+	if coat_col != null:
+		_part(_torso, _cyl(0.215, 0.17, 0.42), Vector3(0, 0.42, -0.005), coat_col, Vector3(1.22, 1, 0.74))
+		var hem := _cyl(0.19, 0.26, 0.55)
+		_part(_torso, hem, Vector3(0, -0.08, -0.01), coat_col, Vector3(1.12, 1, 0.78))
+		# lapels showing the shirt underneath
+		_part(_torso, _box(Vector3(0.09, 0.32, 0.02)), Vector3(0, 0.44, 0.15), top)
+		if o.get("collar", false):
+			_part(_torso, _cyl(0.125, 0.11, 0.1), Vector3(0, 0.68, -0.015), coat_col, Vector3(1.1, 1, 1.0))
 	if dress:
-		var skirt := CylinderMesh.new()
-		skirt.top_radius = 0.2
-		skirt.bottom_radius = 0.42
-		skirt.height = 0.85
-		_part(_torso, skirt, Vector3(0, -0.42, 0), o.get("bottom", top))
+		_part(_torso, _cyl(0.17, 0.44, 0.88), Vector3(0, -0.4, 0), o.get("bottom", top))
 	if o.has("trim"):
 		var glow := _mat(o.trim, true)
-		_part(_torso, _box(Vector3(0.03, 0.45, 0.02)), Vector3(-0.09, 0.32, 0.14), glow)
-		_part(_torso, _box(Vector3(0.03, 0.45, 0.02)), Vector3(0.09, 0.32, 0.14), glow)
-		_part(_torso, _box(Vector3(0.4, 0.03, 0.24)), Vector3(0, 0.02, 0), glow)
+		for side in [-1.0, 1.0]:
+			_part(_torso, _box(Vector3(0.022, 0.4, 0.02)), Vector3(side * 0.075, 0.42, 0.155), glow)
+		_part(_torso, _box(Vector3(0.36, 0.022, 0.02)), Vector3(0, 0.26, 0.135), glow)
 	if o.get("pads", false):
 		for side in [-1.0, 1.0]:
-			_part(_torso, _box(Vector3(0.16, 0.08, 0.2)), Vector3(side * 0.24, 0.55, 0), o.get("hat_color", top).darkened(0.2))
+			_part(_torso, _sphere(0.1), Vector3(side * 0.25, 0.6, 0), o.get("hat_color", top).darkened(0.15), Vector3(1.1, 0.7, 1.1))
 	if o.get("badge", false):
-		_part(_torso, _sphere(0.035), Vector3(0.09, 0.42, 0.14), _mat(Color("ffd34d"), true))
+		_part(_torso, _sphere(0.035), Vector3(0.1, 0.5, 0.14), _mat(Color("ffd34d"), true))
 	if o.has("scarf"):
-		_part(_torso, _box(Vector3(0.3, 0.08, 0.24)), Vector3(0, 0.6, 0.02), o.scarf)
+		_part(_torso, _cyl(0.12, 0.15, 0.1), Vector3(0, 0.66, 0.0), o.scarf)
 
-	# head
-	var head := _joint(_torso, Vector3(0, 0.68, 0))
-	_part(head, _capsule(0.05, 0.1), Vector3(0, -0.04, 0), skin)
-	_part(head, _sphere(0.115), Vector3(0, 0.1, 0), skin, Vector3(0.92, 1.08, 1.0))
-	var eye := _mat(o.eyes, true) if o.has("eyes") else _mat(Color("1a1a22"))
+	# ---- head: skull, jaw, ears, brows, eyes, nose, mouth, hair
+	var head := _joint(_torso, Vector3(0, 0.7, 0))
+	_part(head, _cyl(0.048, 0.055, 0.12), Vector3(0, 0.0, 0), skin)
+	_part(head, _sphere(0.112), Vector3(0, 0.15, 0), skin, Vector3(0.9, 1.05, 1.0))
+	_part(head, _sphere(0.08), Vector3(0, 0.085, 0.03), skin, Vector3(0.95, 0.75, 0.95))  # jaw
 	for side in [-1.0, 1.0]:
-		_part(head, _box(Vector3(0.03, 0.02, 0.01)), Vector3(side * 0.04, 0.12, 0.105), eye)
-	_part(head, _box(Vector3(0.025, 0.04, 0.03)), Vector3(0, 0.08, 0.115), skin.darkened(0.08))
-	var hair: Color = o.get("hair", Color("2a1c12"))
+		_part(head, _sphere(0.025), Vector3(side * 0.1, 0.14, 0), skin.darkened(0.06), Vector3(0.6, 1.2, 1))
+		if o.has("eyes"):
+			_part(head, _sphere(0.017), Vector3(side * 0.038, 0.165, 0.098), _mat(o.eyes, true))
+		else:
+			_part(head, _sphere(0.016), Vector3(side * 0.038, 0.165, 0.094), Color("f2f2f0"))
+			_part(head, _sphere(0.009), Vector3(side * 0.038, 0.165, 0.108), Color("2a1c14"))
+		_part(head, _box(Vector3(0.045, 0.011, 0.015)), Vector3(side * 0.04, 0.192, 0.1), hair if o.get("hair_style", "short") != "bald" else skin.darkened(0.3))
+	_part(head, _box(Vector3(0.022, 0.05, 0.035)), Vector3(0, 0.135, 0.112), skin.darkened(0.05))
+	_part(head, _box(Vector3(0.045, 0.009, 0.01)), Vector3(0, 0.085, 0.098), skin.darkened(0.35))
 	match o.get("hair_style", "short"):
 		"short":
-			_part(head, _sphere(0.122), Vector3(0, 0.14, -0.015), hair, Vector3(0.95, 0.8, 1.0))
+			_part(head, _sphere(0.118), Vector3(0, 0.19, -0.012), hair, Vector3(0.95, 0.72, 1.02))
+			_part(head, _box(Vector3(0.18, 0.07, 0.04)), Vector3(0, 0.15, -0.09), hair)
 		"long":
-			_part(head, _sphere(0.124), Vector3(0, 0.14, -0.015), hair, Vector3(0.96, 0.82, 1.0))
-			_part(head, _box(Vector3(0.22, 0.3, 0.06)), Vector3(0, -0.02, -0.09), hair)
+			_part(head, _sphere(0.12), Vector3(0, 0.19, -0.012), hair, Vector3(0.97, 0.75, 1.04))
+			_part(head, _box(Vector3(0.22, 0.32, 0.07)), Vector3(0, 0.05, -0.085), hair)
 		"bun":
-			_part(head, _sphere(0.122), Vector3(0, 0.14, -0.015), hair, Vector3(0.95, 0.8, 1.0))
-			_part(head, _sphere(0.06), Vector3(0, 0.2, -0.1), hair)
+			_part(head, _sphere(0.118), Vector3(0, 0.19, -0.012), hair, Vector3(0.95, 0.72, 1.02))
+			_part(head, _sphere(0.055), Vector3(0, 0.25, -0.1), hair)
 	if o.get("goggles", false):
 		var lens := _mat(Color("ff9a40"), true)
 		for side in [-1.0, 1.0]:
-			_part(head, _cylinder(0.035, 0.03), Vector3(side * 0.045, 0.13, 0.11), lens, Vector3.ONE, Vector3(90, 0, 0))
-		_part(head, _box(Vector3(0.26, 0.03, 0.22)), Vector3(0, 0.13, 0), _mat(Color("3a2a1a")))
+			_part(head, _cyl(0.033, 0.033, 0.03), Vector3(side * 0.042, 0.168, 0.106), lens, Vector3.ONE, Vector3(90, 0, 0))
+		_part(head, _cyl(0.118, 0.118, 0.03), Vector3(0, 0.168, -0.005), Color("3a2a1a"))
 	var hat_col: Color = o.get("hat_color", Color("1a1a1a"))
 	match o.get("hat", ""):
 		"top":
-			_part(head, _cylinder(0.16, 0.015), Vector3(0, 0.2, 0), hat_col)
-			_part(head, _cylinder(0.1, 0.2), Vector3(0, 0.3, 0), hat_col)
+			_part(head, _cyl(0.16, 0.16, 0.015), Vector3(0, 0.25, 0), hat_col)
+			_part(head, _cyl(0.1, 0.105, 0.2), Vector3(0, 0.35, 0), hat_col)
+			_part(head, _cyl(0.106, 0.106, 0.03), Vector3(0, 0.27, 0), Color("5a1a1a"))
 		"bowler":
-			_part(head, _cylinder(0.15, 0.015), Vector3(0, 0.19, 0), hat_col)
-			_part(head, _sphere(0.11), Vector3(0, 0.22, 0), hat_col, Vector3(1, 0.75, 1))
+			_part(head, _cyl(0.15, 0.15, 0.015), Vector3(0, 0.24, 0), hat_col)
+			_part(head, _sphere(0.11), Vector3(0, 0.27, 0), hat_col, Vector3(1, 0.75, 1))
 		"cap":
-			_part(head, _sphere(0.125), Vector3(0, 0.16, 0), hat_col, Vector3(1, 0.7, 1))
-			_part(head, _box(Vector3(0.16, 0.015, 0.12)), Vector3(0, 0.17, 0.13), hat_col)
+			_part(head, _sphere(0.122), Vector3(0, 0.21, 0), hat_col, Vector3(1, 0.66, 1.05))
+			_part(head, _box(Vector3(0.16, 0.012, 0.11)), Vector3(0, 0.22, 0.13), hat_col)
 		"bonnet":
-			_part(head, _sphere(0.135), Vector3(0, 0.14, -0.02), hat_col, Vector3(1, 1, 1.05))
+			_part(head, _sphere(0.132), Vector3(0, 0.18, -0.02), hat_col, Vector3(1, 1, 1.05))
 		"hood":
-			_part(head, _sphere(0.15), Vector3(0, 0.12, -0.03), hat_col, Vector3(1, 1.1, 1.1))
+			_part(head, _sphere(0.148), Vector3(0, 0.16, -0.03), hat_col, Vector3(1, 1.1, 1.1))
 		"helmet":
-			_part(head, _sphere(0.145), Vector3(0, 0.13, 0), hat_col, Vector3(1, 1.05, 1.05))
+			_part(head, _sphere(0.142), Vector3(0, 0.18, 0), hat_col, Vector3(1, 1.02, 1.06))
+			_part(head, _box(Vector3(0.24, 0.05, 0.25)), Vector3(0, 0.1, -0.02), hat_col)
 	if o.has("visor"):
-		_part(head, _box(Vector3(0.24, 0.05, 0.04)), Vector3(0, 0.12, 0.13), _mat(o.visor, true))
+		_part(head, _box(Vector3(0.23, 0.045, 0.04)), Vector3(0, 0.165, 0.125), _mat(o.visor, true))
 
-	# arms
+	# ---- arms: shoulder ball, tapered upper/forearm, elbow, hand with thumb
 	for side in [-1.0, 1.0]:
-		var sh := _joint(_torso, Vector3(side * 0.24, 0.55, 0))
+		var sh := _joint(_torso, Vector3(side * 0.24, 0.58, 0))
 		_shoulders.append(sh)
-		var sleeve: Color = o.get("coat", top)
-		_limb(sh, 0.3, 0.06, sleeve)
+		var sleeve: Color = coat_col if coat_col != null else top
+		_part(sh, _sphere(0.07), Vector3.ZERO, sleeve)
+		_part(sh, _cyl(0.064, 0.05, 0.3), Vector3(0, -0.15, 0), sleeve)
 		var el := _joint(sh, Vector3(0, -0.3, 0))
 		_elbows.append(el)
-		_limb(el, 0.27, 0.05, sleeve)
-		var hand := _joint(el, Vector3(0, -0.3, 0))
-		_part(hand, _sphere(0.05), Vector3.ZERO, o.get("gloves", skin))
+		_part(el, _sphere(0.05), Vector3.ZERO, sleeve)
+		_part(el, _cyl(0.05, 0.04, 0.27), Vector3(0, -0.135, 0), sleeve)
+		_part(el, _cyl(0.044, 0.044, 0.04), Vector3(0, -0.26, 0), skin if not o.has("gloves") else hands)
+		var hand := _joint(el, Vector3(0, -0.31, 0))
+		_part(hand, _box(Vector3(0.05, 0.09, 0.08)), Vector3(0, -0.02, 0), hands)
+		_part(hand, _box(Vector3(0.045, 0.06, 0.07)), Vector3(0, -0.085, 0.005), hands, Vector3.ONE, Vector3(15, 0, 0))
+		_part(hand, _box(Vector3(0.025, 0.05, 0.025)), Vector3(side * -0.03, -0.03, 0.045), hands)
 		if side < 0:
 			right_hand = hand
 		else:
@@ -179,20 +205,23 @@ func swing() -> void:
 
 # ------------------------------------------------------------- helpers
 
-func _mat(c: Color, emissive := false) -> StandardMaterial3D:
-	var key := "%s%s" % [c.to_html(), emissive]
+func _mat(c: Color, emissive := false, metallic := 0.0) -> StandardMaterial3D:
+	var key := "%s%s%s" % [c.to_html(), emissive, metallic]
 	if _mats.has(key):
 		return _mats[key]
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
 	m.roughness = 0.8
+	m.metallic = metallic
+	if metallic > 0.0:
+		m.roughness = 0.3
 	if _chrome and not emissive:
 		m.metallic = 1.0
 		m.roughness = 0.22
 	if emissive:
 		m.emission_enabled = true
 		m.emission = c
-		m.emission_energy_multiplier = 2.0
+		m.emission_energy_multiplier = 0.9
 	_mats[key] = m
 	return m
 
@@ -242,6 +271,16 @@ func _capsule(r: float, h: float) -> CapsuleMesh:
 	m.height = maxf(h, r * 2.0)
 	m.radial_segments = 12
 	m.rings = 4
+	return m
+
+
+func _cyl(r_top: float, r_bottom: float, h: float) -> CylinderMesh:
+	var m := CylinderMesh.new()
+	m.top_radius = r_top
+	m.bottom_radius = r_bottom
+	m.height = h
+	m.radial_segments = 14
+	m.rings = 1
 	return m
 
 

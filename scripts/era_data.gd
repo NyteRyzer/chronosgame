@@ -241,7 +241,7 @@ const HAIR_COLORS := [Color("1a120c"), Color("3a2414"), Color("6a4224"), Color("
 const PLAYER_OUTFIT := {
 	"skin": Color("c68e62"), "hair": Color("1a120c"), "hair_style": "short",
 	"top": Color("1c2433"), "coat": Color("243047"), "bottom": Color("2a2e38"), "shoes": Color("101418"),
-	"trim": Color("5fd4ff"), "gloves": Color("15181e"),
+	"trim": Color("5fd4ff"), "gloves": Color("15181e"), "collar": true, "hero": true,
 }
 
 const COP_OUTFIT := {

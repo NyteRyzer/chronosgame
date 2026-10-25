@@ -42,7 +42,7 @@ func _run() -> void:
 	print("Phase 0: city")
 	check(main.city.obstacles.size() > 150, "city built with %d footprints" % main.city.obstacles.size())
 	check(main.player.is_on_floor(), "player stands on the street")
-	check(main.vehicles_root.get_child_count() == 24, "avenue traffic spawned")
+	check(main.vehicles_root.get_child_count() == 25, "avenue traffic + parked Chrono Cruiser spawned")
 	var path: PackedVector3Array = main.find_path(Vector3(10, 0, 10), Vector3(400, 0, 560))
 	check(path.size() > 20, "street-grid path across town (%d steps)" % path.size())
 	var path_clear := true
@@ -262,6 +262,38 @@ func _run() -> void:
 	check(main.tier() >= 1, "anachronistic cab raises threat (%.0f)" % main.threat)
 	main.toggle_vehicle()
 	check(not main.player.driving and cab.parked, "exit and park the vehicle")
+
+	print("Phase 10b: the Chrono Cruiser")
+	main.energy = 100.0
+	main.jump_to(EraData.PRESENT)
+	await frames(2)
+	var cruiser = null
+	for veh2 in main.vehicles_root.get_children():
+		if veh2.kind == "cruiser":
+			cruiser = veh2
+	check(cruiser != null and cruiser.parked, "Chrono Cruiser parked in 2025")
+	place(cruiser.global_position + Vector3(0, 0.1, 3.0))
+	await frames(1)
+	var t0: float = main.threat
+	main.toggle_vehicle()
+	check(main.player.driving and main.player.vehicle == cruiser and is_equal_approx(main.threat, t0), "your own time car: no theft charge")
+	main.dialed_era = EraData.FUTURE
+	main.energy = 100.0
+	main.player.car_speed = 45.0
+	await frames(2)
+	check(main.era == EraData.FUTURE and main.player.vehicle == cruiser, "Cruiser jumps to 2150 at 88 mph")
+	main.toggle_vehicle()
+	main.energy = 100.0
+	main.jump_to(EraData.PRESENT)
+	await frames(2)
+	main.energy = 100.0
+	main.jump_to(EraData.FUTURE)
+	await frames(2)
+	var still_there := false
+	for veh3 in main.vehicles_root.get_children():
+		if veh3.kind == "cruiser":
+			still_there = true
+	check(still_there, "Cruiser stays parked in 2150 where you left it")
 
 	print("Phase 11: hacking, profiler, time dodge, stutter")
 	main.energy = 100.0
